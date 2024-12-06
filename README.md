@@ -1,0 +1,1 @@
+Simple app created to find a minimum spanning tree based on user input using prim's algorithm.
