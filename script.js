@@ -5,6 +5,7 @@ let selectedNode = null;
 const board = d3.select("#board");
 let lastIndex = 1;
 let result = 0;
+let canRedact = true;
 
 document.getElementById("addGraphBtn").addEventListener("click", () => {
     selectedAction = selectedAction === "addGraph" ? null : "addGraph";
@@ -27,80 +28,84 @@ document.getElementById("deleteBtn").addEventListener("click", () => {
 
 document.getElementById("runPrimBtn").addEventListener("click", runPrim);
 
-document.getElementById("clearBtn").addEventListener("click", clearBoard);
+document.getElementById("runDijkstra").addEventListener("click", () => {
+    if (selectedAction === "runDijkstra") resetGraphStyles();
+    selectedAction = selectedAction === "runDijkstra" ? null : "runDijkstra";
+    toggleActiveButton("runDijkstra");
+});
+
+document.getElementById("clearBtn").addEventListener("click", (event) => clearBoard(event));
 
 function toggleActiveButton(buttonId) {
-    const buttons = document.querySelectorAll('button');
-    buttons.forEach(button => {
-        if (button.id === buttonId) {
-            button.classList.toggle('active');
-        } else {
-            button.classList.remove('active');
-        }
-    });
+    if (canRedact) {
+        const buttons = document.querySelectorAll('button');
+        buttons.forEach(button => {
+            if (button.id === buttonId) {
+                button.classList.toggle('active');
+            } else {
+                button.classList.remove('active');
+            }
+        });
+    }
 }
 
 board.on("click", function (event) {
-    if (selectedAction === "addGraph") {
-        const coords = d3.pointer(event);
-        const newNode = { x: coords[0], y: coords[1], id: lastIndex };
-        lastIndex++;
-        graphNodes.push(newNode);
-        renderGraph();
-    } else if (selectedAction === "addEdge") {
-        const clickedNode = findNodeByCoords(d3.pointer(event));
+    if (canRedact) {
+        if (selectedAction === "addGraph") {
+            const coords = d3.pointer(event);
+            const newNode = {x: coords[0], y: coords[1], id: lastIndex};
+            lastIndex++;
+            graphNodes.push(newNode);
+            renderGraph();
+        } else if (selectedAction === "addEdge") {
+            const clickedNode = findNodeByCoords(d3.pointer(event));
 
-        if (selectedNode && clickedNode && clickedNode !== selectedNode) {
-            const weight = prompt("Введіть вагу для цього ребра:", "1");
+            if (selectedNode && clickedNode && clickedNode !== selectedNode) {
+                const weight = prompt("Введіть вагу для цього ребра:", "1");
 
-            if (weight !== null && !isNaN(weight) && weight > 0) {
-                const existingEdgeIndex = edges.findIndex(edge =>
-                    (edge.source === selectedNode && edge.target === clickedNode) ||
-                    (edge.source === clickedNode && edge.target === selectedNode)
-                );
+                if (weight !== null && !isNaN(weight) && weight > 0) {
+                    const existingEdgeIndex = edges.findIndex(edge =>
+                        (edge.source === selectedNode && edge.target === clickedNode) ||
+                        (edge.source === clickedNode && edge.target === selectedNode)
+                    );
 
-                if (existingEdgeIndex !== -1) {
-                    edges.splice(existingEdgeIndex, 1);
+                    if (existingEdgeIndex !== -1) {
+                        edges.splice(existingEdgeIndex, 1);
+                    }
+
+                    const newEdge = {source: selectedNode, target: clickedNode, weight: parseInt(weight)};
+                    edges.push(newEdge);
+
+                    updateNodeColor(selectedNode.id, "skyblue");
+                    selectedNode = null;
+                    renderGraph();
                 }
-
-                const newEdge = { source: selectedNode, target: clickedNode, weight: parseInt(weight) };
-                edges.push(newEdge);
-
-                updateNodeColor(selectedNode.id, "skyblue");
-                selectedNode = null;
-                renderGraph();
+            } else if (clickedNode) {
+                selectedNode = clickedNode;
+                updateNodeColor(selectedNode.id, "orange");
+            } else {
+                if (selectedNode) {
+                    updateNodeColor(selectedNode.id, "skyblue");
+                    selectedNode = null;
+                }
             }
-        } else if (clickedNode) {
-            selectedNode = clickedNode;
-            updateNodeColor(selectedNode.id, "orange");
-        } else {
-            if (selectedNode) {
-                updateNodeColor(selectedNode.id, "skyblue");
-                selectedNode = null;
+        } else if (selectedAction === "delete") {
+            const clickedNode = findNodeByCoords(d3.pointer(event));
+            if (clickedNode) {
+                edges = edges.filter(edge => edge.source !== clickedNode && edge.target !== clickedNode);
+                graphNodes = graphNodes.filter(node => node !== clickedNode);
+            } else {
+                const clickedEdge = findEdgeByCoords(d3.pointer(event));
+                if (clickedEdge) {
+                    edges = edges.filter(edge => edge !== clickedEdge);
+                }
             }
+            renderGraph();
+        } else if (selectedAction === "runDijkstra") {
+            runDijkstra(event);
         }
-    } else if (selectedAction === "delete") {
-        const clickedNode = findNodeByCoords(d3.pointer(event));
-        if (clickedNode) {
-            edges = edges.filter(edge => edge.source !== clickedNode && edge.target !== clickedNode);
-            graphNodes = graphNodes.filter(node => node !== clickedNode);
-        } else {
-            const clickedEdge = findEdgeByCoords(d3.pointer(event));
-            if (clickedEdge) {
-                edges = edges.filter(edge => edge !== clickedEdge);
-            }
-        }
-        renderGraph();
     }
 });
-
-function updateNodeColor(nodeId, color) {
-    board.selectAll("circle")
-        .filter(d => d.id === nodeId)
-        .transition()
-        .duration(250)
-        .attr("fill", color);
-}
 
 function findNodeByCoords(coords) {
     return graphNodes.find(node => {
@@ -214,35 +219,36 @@ function renderEdges() {
         .text(d => d.weight);
 }
 
+function updateNodeColor(nodeId, color) {
+    board.selectAll("circle")
+        .filter(d => d.id === nodeId)
+        .transition()
+        .duration(500)
+        .attr("fill", color);
+}
+
+function updateEdgeColor(edge, color) {
+    board.selectAll("line")
+        .filter(d => (d.source.id === edge.source.id && d.target.id === edge.target.id) ||
+            (d.source.id === edge.target.id && d.target.id === edge.source.id))
+        .transition()
+        .duration(250)
+        .attr("stroke", color);
+}
+
 async function runPrim() {
     if (graphNodes.length === 0 || edges.length === 0) {
         alert("Немає графів або ребер для виконання алгоритму!");
         return;
     }
-
+    canRedact = false;
+    result = 0;
     resetGraphStyles();
 
     let visitedNodes = new Set();
     let mstEdges = [];
     let startNode = graphNodes[Math.floor(Math.random() * graphNodes.length)];
     visitedNodes.add(startNode.id);
-
-    function updateNodeColor(nodeId, color) {
-        board.selectAll("circle")
-            .filter(d => d.id === nodeId)
-            .transition()
-            .duration(500)
-            .attr("fill", color);
-    }
-
-    function updateEdgeColor(edge, color) {
-        board.selectAll("line")
-            .filter(d => (d.source.id === edge.source.id && d.target.id === edge.target.id) ||
-                (d.source.id === edge.target.id && d.target.id === edge.source.id))
-            .transition()
-            .duration(250)
-            .attr("stroke", color);
-    }
 
     function findMinimumEdge() {
         let minEdge = null;
@@ -311,6 +317,119 @@ async function runPrim() {
         result += e.weight;
     });
     document.getElementById("result").textContent = "Мінімальна довжина остового дерева: " + result;
+    canRedact = true;
+}
+
+async function runDijkstra(event) {
+    if (graphNodes.length === 0 || edges.length === 0) {
+        alert("Немає графів або ребер для виконання алгоритму!");
+        return;
+    }
+
+    const clickedNode = findNodeByCoords(d3.pointer(event));
+    if (selectedNode && clickedNode && clickedNode !== selectedNode) {
+        resetGraphStyles();
+        canRedact = false;
+        const startNode = selectedNode;
+        const endNode = clickedNode;
+
+        const distances = {};
+        const previousNodes = {};
+        const unvisitedNodes = new Set(graphNodes.map(node => node.id));
+
+        graphNodes.forEach(node => {
+            distances[node.id] = Infinity;
+            previousNodes[node.id] = null;
+        });
+        distances[startNode.id] = 0;
+
+        function findNodeWithMinDistance() {
+            let minNode = null;
+            let minDistance = Infinity;
+            unvisitedNodes.forEach(nodeId => {
+                if (distances[nodeId] < minDistance) {
+                    minDistance = distances[nodeId];
+                    minNode = nodeId;
+                }
+            });
+            return minNode;
+        }
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function visualizeStep(nodeId) {
+            updateNodeColor(nodeId, "orange");
+            await delay(500);
+        }
+
+        while (unvisitedNodes.size > 0) {
+            const currentNodeId = findNodeWithMinDistance();
+            if (currentNodeId === null || currentNodeId === endNode.id) break;
+
+            unvisitedNodes.delete(currentNodeId);
+            await visualizeStep(currentNodeId);
+
+            const currentNode = graphNodes.find(node => node.id === currentNodeId);
+            const connectedEdges = edges.filter(edge =>
+                edge.source.id === currentNodeId || edge.target.id === currentNodeId
+            );
+
+            for (const edge of connectedEdges) {
+                const neighborNodeId = edge.source.id === currentNodeId ? edge.target.id : edge.source.id;
+                if (!unvisitedNodes.has(neighborNodeId)) continue;
+
+                const newDistance = distances[currentNodeId] + edge.weight;
+                if (newDistance < distances[neighborNodeId]) {
+                    distances[neighborNodeId] = newDistance;
+                    previousNodes[neighborNodeId] = currentNodeId;
+
+                    updateEdgeColor(edge, "yellow");
+                    await delay(500);
+                }
+            }
+        }
+
+        const path = [];
+        let currentNodeId = endNode.id;
+        while (currentNodeId) {
+            path.unshift(currentNodeId);
+            currentNodeId = previousNodes[currentNodeId];
+        }
+
+        if (path[0] !== startNode.id) {
+            alert("Шлях не знайдено!");
+            canRedact = true;
+            return;
+        }
+
+        for (let i = 0; i < path.length - 1; i++) {
+            const fromNode = graphNodes.find(node => node.id === path[i]);
+            const toNode = graphNodes.find(node => node.id === path[i + 1]);
+            const edge = edges.find(e =>
+                (e.source.id === fromNode.id && e.target.id === toNode.id) ||
+                (e.source.id === toNode.id && e.target.id === fromNode.id)
+            );
+
+            updateNodeColor(selectedNode.id, "green");
+            updateEdgeColor(edge, "green");
+            updateNodeColor(toNode.id, "green");
+            await delay(500);
+        }
+
+        document.getElementById("result").textContent = `Найкоротший шлях: ${path.join(" -> ")}, довжина: ${distances[endNode.id]}`;
+        selectedNode = null;
+        canRedact = true;
+    } else if (clickedNode) {
+        selectedNode = clickedNode;
+        updateNodeColor(selectedNode.id, "orange");
+    } else {
+        if (selectedNode) {
+            updateNodeColor(selectedNode.id, "skyblue");
+            selectedNode = null;
+        }
+    }
 }
 
 function resetGraphStyles() {
